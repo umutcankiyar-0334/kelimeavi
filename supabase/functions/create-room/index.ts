@@ -44,6 +44,7 @@ serve(async (req: Request) => {
     const totalRounds = settings?.totalRounds || 8;
     const roundDurationSeconds = settings?.roundDurationSeconds || 30;
     const resultDurationSeconds = settings?.resultDurationSeconds || 7;
+    const gameMode = settings?.gameMode || 'seed_words';
 
     // Create room
     const { data: room, error: roomError } = await supabase
@@ -56,6 +57,7 @@ serve(async (req: Request) => {
         total_rounds: totalRounds,
         round_duration_seconds: roundDurationSeconds,
         result_duration_seconds: resultDurationSeconds,
+        game_mode: gameMode,
         expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // 2 hours expiry
       })
       .select()
@@ -102,7 +104,9 @@ serve(async (req: Request) => {
         total_rounds: room.total_rounds,
         round_duration_seconds: room.round_duration_seconds,
         result_duration_seconds: room.result_duration_seconds,
+        game_mode: room.game_mode,
       },
+
       player: {
         id: player.id,
         nickname: player.nickname,

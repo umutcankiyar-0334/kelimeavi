@@ -26,6 +26,7 @@ export interface Database {
           created_at: string;
           updated_at: string;
           expires_at: string | null;
+          game_mode: 'seed_words' | 'dictionary';
         };
         Insert: {
           id?: string;
@@ -37,6 +38,7 @@ export interface Database {
           total_rounds?: number;
           round_duration_seconds?: number;
           result_duration_seconds?: number;
+          game_mode?: 'seed_words' | 'dictionary';
           created_at?: string;
           updated_at?: string;
           expires_at?: string | null;
@@ -86,8 +88,8 @@ export interface Database {
           distractor_letters: string[];
           started_at: string;
           ends_at: string;
-          finished_at: string | null;
-          created_at: string;
+          clue: string | null;
+          word_length: number;
         };
         Insert: {
           id?: string;
@@ -101,6 +103,8 @@ export interface Database {
           started_at: string;
           ends_at: string;
           finished_at?: string | null;
+          clue?: string | null;
+          word_length?: number;
           created_at?: string;
         };
         Update: Partial<Database['public']['Tables']['rounds']['Insert']>;
@@ -187,6 +191,8 @@ export interface Database {
           started_at: string;
           ends_at: string;
           finished_at: string | null;
+          clue: string | null;
+          word_length: number;
         };
       };
     };

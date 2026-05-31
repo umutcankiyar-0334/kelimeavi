@@ -57,9 +57,10 @@ serve(async (req: Request) => {
     // Fetch the room settings
     const { data: room, error: roomError } = await supabase
       .from('rooms')
-      .select('total_rounds, round_duration_seconds')
+      .select('total_rounds, round_duration_seconds, game_mode')
       .eq('id', roomId)
       .single();
+
 
     if (roomError || !room) {
       return errorResponse('Room details not found.');
@@ -88,32 +89,30 @@ serve(async (req: Request) => {
     // We process each player
     for (const player of players) {
       const answer = answersMap.get(player.id);
+      const didSubmit = !!answer && answer.submitted_word !== '';
       let isCorrect = false;
-      let scoreAwarded = 0;
-      let baseScore = 0;
-      let speedBonus = 0;
-      let comboBonus = 0;
-      let responseTimeMs = roundDurationMs; // default to maximum if didn't answer or answered late
+      let responseTimeMs = roundDurationMs;
 
-      if (answer) {
+      if (answer && didSubmit) {
         // Correct answer check: exact match of original word with normalized answer
         isCorrect = answer.normalized_word === round.original_word;
         const submittedTime = new Date(answer.submitted_at).getTime();
         responseTimeMs = Math.min(roundDurationMs, Math.max(0, submittedTime - startedTime));
+      }
 
-        const scoring = calculateScore(
-          round.original_word.length,
-          isCorrect,
-          responseTimeMs,
-          roundDurationMs,
-          player.combo_count
-        );
+      // v2 scoring: passes full word string + didSubmit flag
+      const scoring = calculateScore(
+        round.original_word,
+        isCorrect,
+        didSubmit,
+        responseTimeMs,
+        roundDurationMs,
+        player.combo_count
+      );
 
-        scoreAwarded = scoring.scoreAwarded;
-        baseScore = scoring.baseScore;
-        speedBonus = scoring.speedBonus;
-        comboBonus = scoring.comboBonus;
+      const { scoreAwarded, baseScore, speedBonus, comboBonus } = scoring;
 
+      if (answer && didSubmit) {
         // Update answer with calculation details
         await supabase
           .from('answers')
@@ -126,7 +125,7 @@ serve(async (req: Request) => {
             score_awarded: scoreAwarded,
           })
           .eq('id', answer.id);
-      } else {
+      } else if (!answer) {
         // Player did not submit any answer: create a blank record for audit
         await supabase.from('answers').insert({
           room_id: roomId,
@@ -143,7 +142,7 @@ serve(async (req: Request) => {
         });
       }
 
-      // Update player scores & combos
+      // Update player scores & combos (allow score to go below 0 for wrong answers)
       const newCombo = nextComboCount(isCorrect, player.combo_count);
       const newScore = player.score + scoreAwarded;
 
@@ -185,12 +184,20 @@ serve(async (req: Request) => {
       const excludeWords = previousRounds?.map((r) => r.original_word) || [];
 
       const nextRoundConfig = { roundNumber: nextRoundNumber, totalRounds: room.total_rounds };
-      const nextWord = selectWord(nextRoundConfig, excludeWords);
+      const nextWord = selectWord(nextRoundConfig, excludeWords, room.game_mode);
 
-      const wordLetters = [...nextWord.word];
-      const distractorCount = getDistractorCount(nextRoundNumber, room.total_rounds, nextWord.difficulty);
-      const distractors = generateDistractors(wordLetters, distractorCount);
-      const scrambled = mergeAndShuffle(wordLetters, distractors);
+      let scrambled: string[] = [];
+      let distractors: string[] = [];
+      let clue: string | null = null;
+
+      if (room.game_mode === 'dictionary') {
+        clue = nextWord.clue || '';
+      } else {
+        const wordLetters = [...nextWord.word];
+        const distractorCount = getDistractorCount(nextRoundNumber, room.total_rounds, nextWord.difficulty);
+        distractors = generateDistractors(wordLetters, distractorCount);
+        scrambled = mergeAndShuffle(wordLetters, distractors);
+      }
 
       // Start time starts AFTER results view duration (e.g. 7 seconds from now)
       const delayMs = 7000; // result duration
@@ -208,6 +215,8 @@ serve(async (req: Request) => {
         distractor_letters: distractors,
         started_at: startedAt.toISOString(),
         ends_at: endsAt.toISOString(),
+        clue: clue,
+        word_length: nextWord.word.length,
       });
 
       await supabase.from('room_events').insert({

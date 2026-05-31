@@ -11,3 +11,5 @@ export * from './core/validate-word';
 export * from './core/scoring';
 export * from './types';
 export { default as trWords } from './data/tr-words';
+export { default as trDictionaryWords } from './data/tr-dictionary-words';
+

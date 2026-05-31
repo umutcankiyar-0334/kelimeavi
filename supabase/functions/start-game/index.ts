@@ -38,7 +38,7 @@ serve(async (req: Request) => {
     // Verify room status and player list
     const { data: room, error: roomError } = await supabase
       .from('rooms')
-      .select('id, code, status, total_rounds, round_duration_seconds')
+      .select('id, code, status, total_rounds, round_duration_seconds, game_mode')
       .eq('id', roomId)
       .single();
 
@@ -68,13 +68,20 @@ serve(async (req: Request) => {
 
     // Select the first word
     const roundConfig = { roundNumber: 1, totalRounds: room.total_rounds };
-    const wordEntry = selectWord(roundConfig, []);
+    const wordEntry = selectWord(roundConfig, [], room.game_mode);
 
-    const wordLetters = [...wordEntry.word];
-    const difficultyConfig = wordEntry.difficulty;
-    const distractorCount = getDistractorCount(1, room.total_rounds, difficultyConfig);
-    const distractors = generateDistractors(wordLetters, distractorCount);
-    const scrambled = mergeAndShuffle(wordLetters, distractors);
+    let scrambled: string[] = [];
+    let distractors: string[] = [];
+    let clue: string | null = null;
+
+    if (room.game_mode === 'dictionary') {
+      clue = wordEntry.clue || '';
+    } else {
+      const wordLetters = [...wordEntry.word];
+      const distractorCount = getDistractorCount(1, room.total_rounds, wordEntry.difficulty);
+      distractors = generateDistractors(wordLetters, distractorCount);
+      scrambled = mergeAndShuffle(wordLetters, distractors);
+    }
 
     const roundDurationMs = room.round_duration_seconds * 1000;
     const startedAt = new Date();
@@ -89,10 +96,12 @@ serve(async (req: Request) => {
         status: 'active',
         scrambled_letters: scrambled,
         original_word: wordEntry.word,
-        difficulty: difficultyConfig,
+        difficulty: wordEntry.difficulty,
         distractor_letters: distractors,
         started_at: startedAt.toISOString(),
         ends_at: endsAt.toISOString(),
+        clue: clue,
+        word_length: wordEntry.word.length,
       })
       .select()
       .single();
@@ -100,6 +109,7 @@ serve(async (req: Request) => {
     if (roundError || !round) {
       return errorResponse('Failed to start first round: ' + roundError?.message);
     }
+
 
     // Set room status to playing
     const { error: updateError } = await supabase

@@ -28,6 +28,7 @@ export interface ScoreResult {
   baseScore: number;
   speedBonus: number;
   comboBonus: number;
+  letterBonus: number;
   scoreAwarded: number;
   responseTimeMs: number;
 }

@@ -21,6 +21,7 @@ export default function LandingPage() {
   const [createNickname, setCreateNickname] = useState('');
   const [rounds, setRounds] = useState(8);
   const [duration, setDuration] = useState(30);
+  const [gameMode, setGameMode] = useState<'seed_words' | 'dictionary'>('seed_words');
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +38,7 @@ export default function LandingPage() {
           totalRounds: rounds,
           roundDurationSeconds: duration,
           resultDurationSeconds: 7,
+          gameMode,
         },
       });
 
@@ -223,8 +225,47 @@ export default function LandingPage() {
                 />
               </div>
 
+              {/* Game Mode Selector */}
+              <div className="mt-1">
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                  Oyun Modu
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGameMode('seed_words')}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all text-left ${
+                      gameMode === 'seed_words'
+                        ? 'border-purple-500/60 bg-purple-500/10 text-white'
+                        : 'border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20'
+                    }`}
+                  >
+                    <span className="text-lg">🔀</span>
+                    <div>
+                      <div className="text-xs font-bold">Harf Karıştırma</div>
+                      <div className="text-[10px] text-slate-500 leading-tight mt-0.5">Harfleri doğru sırala</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGameMode('dictionary')}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all text-left ${
+                      gameMode === 'dictionary'
+                        ? 'border-cyan-500/60 bg-cyan-500/10 text-white'
+                        : 'border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20'
+                    }`}
+                  >
+                    <span className="text-lg">📖</span>
+                    <div>
+                      <div className="text-xs font-bold">Soru &amp; Cevap</div>
+                      <div className="text-[10px] text-slate-500 leading-tight mt-0.5">Tanımdan kelimeyi bul</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               {/* Game Settings */}
-              <div className="grid grid-cols-2 gap-3 mt-1">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                     Toplam Tur Sayısı

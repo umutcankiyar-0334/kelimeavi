@@ -17,6 +17,7 @@ export interface GameState {
   totalRounds: number;
   roundDurationSeconds: number;
   resultDurationSeconds: number;
+  gameMode: Room['game_mode'] | null;
 
   // Players & Round State
   players: PublicPlayer[];
@@ -54,6 +55,7 @@ export const useGameStore = create<GameState>((set) => ({
   totalRounds: 8,
   roundDurationSeconds: 30,
   resultDurationSeconds: 7,
+  gameMode: null,
 
   players: [],
   currentRound: null,
@@ -86,6 +88,7 @@ export const useGameStore = create<GameState>((set) => ({
       totalRounds: room.total_rounds ?? state.totalRounds,
       roundDurationSeconds: room.round_duration_seconds ?? state.roundDurationSeconds,
       resultDurationSeconds: room.result_duration_seconds ?? state.resultDurationSeconds,
+      gameMode: room.game_mode ?? state.gameMode,
     }));
   },
 
@@ -120,6 +123,10 @@ export const useGameStore = create<GameState>((set) => ({
       roomCode: null,
       roomStatus: null,
       hostPlayerId: null,
+      totalRounds: 8,
+      roundDurationSeconds: 30,
+      resultDurationSeconds: 7,
+      gameMode: null,
       players: [],
       currentRound: null,
       myLastAnswer: null,

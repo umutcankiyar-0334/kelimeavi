@@ -26,6 +26,7 @@ export default function RoomPage() {
     isConnecting,
     isSynced,
     error,
+    gameMode,
   } = store;
 
   // Nickname entry for direct link invites
@@ -35,6 +36,10 @@ export default function RoomPage() {
   // Active game timer countdown state
   const [timeLeft, setTimeLeft] = useState(0);
   const timerRef = useRef<number | null>(null);
+
+  // Countdown until next round becomes active (result screen)
+  const [resultCountdown, setResultCountdown] = useState(0);
+  const resultTimerRef = useRef<number | null>(null);
 
   // Active answer text input
   const [answerInput, setAnswerInput] = useState('');
@@ -90,7 +95,7 @@ export default function RoomPage() {
     };
   }, [roomCode]);
 
-  // ─── 2. ACTIVE ROUND COUNTDOWN TIMER ───────────────────────────────────────
+  // ─── 2A. ACTIVE ROUND COUNTDOWN TIMER ─────────────────────────────────────
   useEffect(() => {
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
@@ -113,7 +118,7 @@ export default function RoomPage() {
         }
       };
 
-      calculateTimeLeft(); // initial run
+      calculateTimeLeft();
       timerRef.current = window.setInterval(calculateTimeLeft, 500);
     }
 
@@ -121,6 +126,46 @@ export default function RoomPage() {
       if (timerRef.current) window.clearInterval(timerRef.current);
     };
   }, [roomStatus, currentRound, isHost]);
+
+  // ─── 2B. PENDING ROUND → ACTIVE ACTIVATION TIMER ──────────────────────────
+  // When a round is pending, count down to its started_at and activate it.
+  // Any client triggers this (idempotent on the server).
+  useEffect(() => {
+    if (resultTimerRef.current) {
+      window.clearInterval(resultTimerRef.current);
+      resultTimerRef.current = null;
+    }
+
+    if (roomStatus === 'playing' && currentRound && currentRound.status === 'pending' && currentRound.started_at) {
+      const tick = () => {
+        const diff = new Date(currentRound.started_at!).getTime() - Date.now();
+        const seconds = Math.max(0, Math.ceil(diff / 1000));
+        setResultCountdown(seconds);
+
+        if (seconds <= 0) {
+          if (resultTimerRef.current) {
+            window.clearInterval(resultTimerRef.current);
+            resultTimerRef.current = null;
+          }
+          // Activate the round — idempotent, first writer wins
+          invokeEdgeFunction('activate-round', { roundId: currentRound.id }).catch(console.error);
+        }
+      };
+
+      tick();
+      resultTimerRef.current = window.setInterval(tick, 500);
+    }
+
+    return () => {
+      if (resultTimerRef.current) window.clearInterval(resultTimerRef.current);
+    };
+  }, [roomStatus, currentRound]);
+
+
+  // Reset answer input whenever a new round starts
+  useEffect(() => {
+    setAnswerInput('');
+  }, [currentRound?.id]);
 
   // ─── 3. HANDLERS ──────────────────────────────────────────────────────────
   const triggerFinishRound = async () => {
@@ -591,8 +636,14 @@ export default function RoomPage() {
 
                 {/* Delay info */}
                 {currentRound.status === 'pending' && (
-                  <div className="text-center text-xs font-semibold text-slate-500 bg-white/5 border border-white/10 rounded-xl p-3 animate-pulse">
-                    Sonraki tur hazırlanıyor, lobi sayacı bekleniyor...
+                  <div className="text-center bg-white/5 border border-white/10 rounded-xl p-4">
+                    <p className="text-xs font-bold text-purple-400 uppercase tracking-wider mb-1">Sonraki Tur</p>
+                    <p className="text-3xl font-black text-white tabular-nums">
+                      {resultCountdown > 0 ? resultCountdown : '⚡'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {resultCountdown > 0 ? 'saniye sonra başlıyor...' : 'Başlatılıyor...'}
+                    </p>
                   </div>
                 )}
               </motion.div>
@@ -605,23 +656,58 @@ export default function RoomPage() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="flex flex-col gap-6"
               >
-                {/* Scrambled letters board */}
-                <div className="glass-premium rounded-2xl p-6 sm:p-8 border-white/5 text-center shadow-xl">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">HARFLER</span>
-                  <div className="flex flex-wrap gap-2.5 justify-center mt-4">
-                    {currentRound.scrambled_letters.map((letter, idx) => (
-                      <motion.div
-                        key={`${letter}-${idx}`}
-                        initial={{ opacity: 0, scale: 0.5, y: 15 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        transition={{ delay: idx * 0.04, type: 'spring', stiffness: 150 }}
-                        className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 shadow-lg text-2xl sm:text-3xl font-extrabold text-white flex items-center justify-center uppercase select-none hover:border-purple-500/40 hover:scale-105 transition-all animate-pop cursor-default"
-                      >
-                        {letter}
-                      </motion.div>
-                    ))}
+                {/* ─── SEED WORDS mode: scrambled letter tiles ─────────── */}
+                {gameMode !== 'dictionary' ? (
+                  <div className="glass-premium rounded-2xl p-6 sm:p-8 border-white/5 text-center shadow-xl">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">HARFLER</span>
+                    <div className="flex flex-wrap gap-2.5 justify-center mt-4">
+                      {currentRound.scrambled_letters.map((letter, idx) => (
+                        <motion.div
+                          key={`${letter}-${idx}`}
+                          initial={{ opacity: 0, scale: 0.5, y: 15 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          transition={{ delay: idx * 0.04, type: 'spring', stiffness: 150 }}
+                          className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 border border-white/10 shadow-lg text-2xl sm:text-3xl font-extrabold text-white flex items-center justify-center uppercase select-none hover:border-purple-500/40 hover:scale-105 transition-all animate-pop cursor-default"
+                        >
+                          {letter}
+                        </motion.div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* ─── DICTIONARY mode: clue + blank letter slots ──────── */
+                  <div className="glass-premium rounded-2xl p-6 sm:p-8 border-cyan-500/10 text-center shadow-xl">
+                    {/* Mode badge */}
+                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase bg-cyan-500/15 text-cyan-300 border border-cyan-500/25 rounded-full">
+                      📖 Soru &amp; Cevap
+                    </span>
+
+                    {/* Clue / Definition */}
+                    <div className="mt-4 bg-white/[0.03] border border-white/8 rounded-xl p-4">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">İPUCU</p>
+                      <p className="text-base font-semibold text-slate-100 leading-relaxed">
+                        {currentRound.clue || 'İpucu yükleniyor...'}
+                      </p>
+                    </div>
+
+                    {/* Blank letter slots showing word length */}
+                    <div className="mt-5">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+                        {currentRound.word_length ?? '?'} Harfli Kelime
+                      </p>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {Array.from({ length: currentRound.word_length ?? 0 }).map((_, i) => (
+                          <div
+                            key={i}
+                            className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-b-2 border-cyan-500/50 bg-white/[0.03] flex items-center justify-center text-xs text-slate-600 font-bold"
+                          >
+                            _
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Submitting input */}
                 {isSubmitted ? (
@@ -638,18 +724,26 @@ export default function RoomPage() {
                     <input
                       type="text"
                       required
-                      placeholder="Cevabınızı buraya yazın..."
+                      placeholder={gameMode === 'dictionary' ? 'Kelimeyi yazın...' : 'Cevabınızı buraya yazın...'}
                       autoComplete="off"
                       autoFocus
                       value={answerInput}
                       onChange={(e) => setAnswerInput(e.target.value)}
-                      className="w-full px-5 py-4 rounded-xl border border-white/10 bg-slate-900 text-white placeholder-slate-500 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-center uppercase tracking-wide font-extrabold text-xl shadow-inner"
+                      className={`w-full px-5 py-4 rounded-xl border bg-slate-900 text-white placeholder-slate-500 outline-none text-center uppercase tracking-wide font-extrabold text-xl shadow-inner transition-all ${
+                        gameMode === 'dictionary'
+                          ? 'border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
+                          : 'border-white/10 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                      }`}
                     />
 
                     <button
                       type="submit"
                       disabled={submittingAnswer || !answerInput.trim()}
-                      className="w-full py-4.5 rounded-xl font-bold text-white bg-purple-600 hover:bg-purple-500 transition-all shadow-lg hover:shadow-purple-500/20 disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer text-base"
+                      className={`w-full py-4.5 rounded-xl font-bold text-white transition-all shadow-lg disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer text-base ${
+                        gameMode === 'dictionary'
+                          ? 'bg-cyan-600 hover:bg-cyan-500 hover:shadow-cyan-500/20'
+                          : 'bg-purple-600 hover:bg-purple-500 hover:shadow-purple-500/20'
+                      }`}
                     >
                       {submittingAnswer ? (
                         <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
