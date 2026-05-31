@@ -456,12 +456,13 @@ const COMMON_VOWELS = ['a', 'e', 'i', 'o', 'u', 'ı', 'ö', 'ü'];
 const COMMON_CONSONANTS = ['r', 'n', 's', 'l', 'k', 't', 'm', 'b', 'y', 'd', 'ç', 'ş'];
 
 export function getDistractorCount(roundNumber: number, totalRounds: number, difficulty: DifficultyLevel): number {
-  if (difficulty === 'hard') {
-    return roundNumber >= Math.floor(totalRounds * 0.6) ? 2 : 1;
+  if (difficulty === 'easy') {
+    return 1;
   }
-  if (difficulty === 'easy') return 0;
-  const progress = roundNumber / totalRounds;
-  return progress < 0.4 ? 0 : 1;
+  if (difficulty === 'medium') {
+    return roundNumber >= Math.floor(totalRounds * 0.5) ? 2 : 1;
+  }
+  return roundNumber >= Math.floor(totalRounds * 0.5) ? 3 : 2;
 }
 
 export function generateDistractors(wordLetters: string[], count: number): string[] {

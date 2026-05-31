@@ -48,6 +48,77 @@ export default function RoomPage() {
   // Copy code state
   const [copied, setCopied] = useState(false);
 
+  // ─── LOCAL STATE FOR LETTER REVEALS ───
+  const [revealedLetters, setRevealedLetters] = useState<Record<number, string>>({});
+  const [revealVotes, setRevealVotes] = useState<string[]>([]); // player IDs who voted
+  const [isShaking, setIsShaking] = useState(false); // for wrong guess feedback
+
+  // ─── AUDIO SYNTHESIZER (WEB AUDIO API) ───
+  const playSound = (type: 'click' | 'reveal' | 'success' | 'error') => {
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      
+      if (type === 'click') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.1);
+      } else if (type === 'reveal') {
+        // High premium sweep
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(400, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.35);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      } else if (type === 'success') {
+        // Joyful major chord third interval
+        const now = ctx.currentTime;
+        [523.25, 659.25].forEach((freq, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0.1, now + idx * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + idx * 0.08 + 0.25);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.25);
+        });
+      } else if (type === 'error') {
+        // Low buzzing fail chord
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(130, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      }
+    } catch (e) {
+      console.warn('AudioContext failed to play sound', e);
+    }
+  };
+
   // ─── 1. MOUNT & AUTO RECONNECT ──────────────────────────────────────────────
   useEffect(() => {
     const storedPlayerId = localStorage.getItem('tr_word_game_player_id');
@@ -162,10 +233,60 @@ export default function RoomPage() {
   }, [roomStatus, currentRound]);
 
 
-  // Reset answer input whenever a new round starts
+  // Reset answer input whenever a new round starts, and clear letter reveals
   useEffect(() => {
     setAnswerInput('');
+    setRevealedLetters({});
+    setRevealVotes([]);
   }, [currentRound?.id]);
+
+  // ─── REALTIME EVENT HANDLER FOR REVEALS & CLICK BROADCASTS ───
+  useEffect(() => {
+    const handleRoomEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || !currentRound) return;
+
+      const { type, payload } = detail;
+      if (payload.round_id !== currentRound.id) return;
+
+      if (type === 'letter_reveal_vote') {
+        // Add player to local vote list
+        setRevealVotes((prev) => {
+          if (prev.includes(payload.player_id)) return prev;
+          playSound('click');
+          return [...prev, payload.player_id];
+        });
+      } else if (type === 'letter_revealed') {
+        // Play premium sweep sound and merge revealed index details
+        playSound('reveal');
+        setRevealVotes([]); // Reset votes since a letter has been successfully revealed!
+        if (payload.revealed_indices && Array.isArray(payload.revealed_indices)) {
+          const nextRecord: Record<number, string> = {};
+          payload.revealed_indices.forEach((idx: number) => {
+            // Keep slot matching or look up inside the index payload
+            if (payload.letter && payload.index === idx) {
+              nextRecord[idx] = payload.letter;
+            }
+          });
+          setRevealedLetters((prev) => ({
+            ...prev,
+            ...nextRecord,
+            [payload.index]: payload.letter
+          }));
+        } else if (payload.index !== undefined && payload.letter) {
+          setRevealedLetters((prev) => ({
+            ...prev,
+            [payload.index]: payload.letter
+          }));
+        }
+      }
+    };
+
+    window.addEventListener('supabase_room_event', handleRoomEvent);
+    return () => {
+      window.removeEventListener('supabase_room_event', handleRoomEvent);
+    };
+  }, [currentRound]);
 
   // ─── 3. HANDLERS ──────────────────────────────────────────────────────────
   const triggerFinishRound = async () => {
@@ -242,8 +363,62 @@ export default function RoomPage() {
     e.preventDefault();
     if (!answerInput.trim() || !currentRound || isSubmitted || submittingAnswer) return;
 
+    const text = answerInput.trim().toLocaleLowerCase('tr-TR');
+
+    // ─── STRICT CORRECT SPELLING CHECK (CLIENT-SIDE) ───
+    if (gameMode !== 'dictionary') {
+      // 1. In Harf Karıştırma (Seed Words), all characters must be present in scrambled letters list
+      const scrambledCounts: Record<string, number> = {};
+      currentRound.scrambled_letters.forEach((char) => {
+        const lower = char.toLowerCase();
+        scrambledCounts[lower] = (scrambledCounts[lower] || 0) + 1;
+      });
+
+      let isValidSpelling = true;
+      for (const char of text) {
+        if (!scrambledCounts[char] || scrambledCounts[char] <= 0) {
+          isValidSpelling = false;
+          break;
+        }
+        scrambledCounts[char]--;
+      }
+
+      if (!isValidSpelling) {
+        playSound('error');
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 500);
+        toast.error('Girdiğiniz harfler yerdeki harflerle uyuşmuyor!');
+        return;
+      }
+    } else {
+      // 2. In Soru & Cevap (Dictionary), the answer length must exactly match the slot/word length
+      if (text.length !== currentRound.word_length) {
+        playSound('error');
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 500);
+        toast.error(`Girdiğiniz kelime ${currentRound.word_length} harfli olmalıdır!`);
+        return;
+      }
+
+      // If there are revealed letters, check if they match the typed answer at their index
+      let matchesReveals = true;
+      Object.entries(revealedLetters).forEach(([idxStr, letter]) => {
+        const idx = Number(idxStr);
+        if (text[idx] !== letter.toLocaleLowerCase('tr-TR')) {
+          matchesReveals = false;
+        }
+      });
+
+      if (!matchesMatchesReveals(text, revealedLetters)) {
+        playSound('error');
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 500);
+        toast.error('Girdiğiniz kelime açılan harflerle eşleşmiyor!');
+        return;
+      }
+    }
+
     setSubmittingAnswer(true);
-    const text = answerInput.trim();
     try {
       const res = await invokeEdgeFunction('submit-answer', {
         playerId,
@@ -252,17 +427,49 @@ export default function RoomPage() {
         submittedWord: text,
       });
 
+      // Submit succeeded
+      playSound('success');
       store.setSubmittedState(true, text);
-      toast.success('Kelime gönderildi, cevaplar bekleniyor...');
+      toast.success('Cevabınız başarıyla iletildi!');
 
       if (res.autoFinished) {
         // Automatically trigger finish round immediately if all players submitted
         await triggerFinishRound();
       }
     } catch (err: any) {
-      toast.error(err.message);
+      playSound('error');
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 500);
+      toast.error(err.message || 'Cevap gönderilemedi.');
     } finally {
       setSubmittingAnswer(false);
+    }
+  };
+
+  // Helper function to check if typing matches reveals
+  function matchesMatchesReveals(typed: string, reveals: Record<number, string>): boolean {
+    for (const [idxStr, val] of Object.entries(reveals)) {
+      const index = parseInt(idxStr, 10);
+      if (typed[index] !== val.toLowerCase()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ─── REQUEST LETTER REVEAL CLICK HANDLER ───
+  const handleRequestLetterReveal = async () => {
+    if (!currentRound || isSubmitted) return;
+    playSound('click');
+    try {
+      await invokeEdgeFunction('reveal-letter', {
+        playerId,
+        token: store.sessionToken,
+        roundId: currentRound.id
+      });
+      toast.info('Harf istendi! Tüm oyuncular tıkladığında yeni harf açılacak.');
+    } catch (err: any) {
+      toast.error(err.message || 'Harf isteği gönderilemedi.');
     }
   };
 
@@ -696,63 +903,93 @@ export default function RoomPage() {
                         {currentRound.word_length ?? '?'} Harfli Kelime
                       </p>
                       <div className="flex flex-wrap gap-2 justify-center">
-                        {Array.from({ length: currentRound.word_length ?? 0 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-b-2 border-cyan-500/50 bg-white/[0.03] flex items-center justify-center text-xs text-slate-600 font-bold"
-                          >
-                            _
-                          </div>
-                        ))}
+                        {Array.from({ length: currentRound.word_length ?? 0 }).map((_, i) => {
+                          const letter = revealedLetters[i];
+                          return (
+                            <motion.div
+                              key={i}
+                              initial={letter ? { scale: 0.8, y: -5 } : {}}
+                              animate={letter ? { scale: 1, y: 0 } : {}}
+                              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl border-b-2 flex items-center justify-center text-lg font-black transition-all uppercase ${
+                                letter
+                                  ? 'border-cyan-400 bg-cyan-950/20 text-cyan-300 scale-105'
+                                  : 'border-cyan-500/50 bg-white/[0.03] text-slate-600'
+                              }`}
+                            >
+                              {letter || '_'}
+                            </motion.div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Submitting input */}
-                {isSubmitted ? (
-                  <div className="glass rounded-2xl p-6 border-purple-500/10 text-center shadow-lg">
-                    <svg className="w-8 h-8 text-emerald-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <p className="text-sm font-semibold text-slate-300">Cevabınız İletildi</p>
-                    <p className="text-xs text-slate-400 mt-1">Cevabınız: <span className="font-bold text-purple-400 uppercase">{myLastAnswer}</span></p>
-                    <p className="text-xs text-slate-500 mt-3 animate-pulse">Diğer oyuncuların bitirmesi bekleniyor...</p>
-                  </div>
-                ) : (
-                  <form onSubmit={handleAnswerSubmit} className="flex flex-col gap-3">
-                    <input
-                      type="text"
-                      required
-                      placeholder={gameMode === 'dictionary' ? 'Kelimeyi yazın...' : 'Cevabınızı buraya yazın...'}
-                      autoComplete="off"
-                      autoFocus
-                      value={answerInput}
-                      onChange={(e) => setAnswerInput(e.target.value)}
-                      className={`w-full px-5 py-4 rounded-xl border bg-slate-900 text-white placeholder-slate-500 outline-none text-center uppercase tracking-wide font-extrabold text-xl shadow-inner transition-all ${
-                        gameMode === 'dictionary'
-                          ? 'border-white/10 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
-                          : 'border-white/10 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
-                      }`}
-                    />
-
+                {/* Shaking Wrapper for wrong guesses */}
+                <motion.div
+                  animate={isShaking ? { x: [-10, 10, -10, 10, -5, 5, 0] } : { x: 0 }}
+                  transition={{ duration: 0.4 }}
+                  className="flex flex-col gap-3"
+                >
+                  {/* Harf Al Button (Only in dictionary mode, when not already submitted) */}
+                  {gameMode === 'dictionary' && !isSubmitted && (
                     <button
-                      type="submit"
-                      disabled={submittingAnswer || !answerInput.trim()}
-                      className={`w-full py-4.5 rounded-xl font-bold text-white transition-all shadow-lg disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer text-base ${
-                        gameMode === 'dictionary'
-                          ? 'bg-cyan-600 hover:bg-cyan-500 hover:shadow-cyan-500/20'
-                          : 'bg-purple-600 hover:bg-purple-500 hover:shadow-purple-500/20'
-                      }`}
+                      type="button"
+                      onClick={handleRequestLetterReveal}
+                      className="w-full py-3.5 rounded-xl border border-cyan-500/20 bg-cyan-950/10 hover:bg-cyan-950/20 text-cyan-300 font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
                     >
-                      {submittingAnswer ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        'Gönder'
-                      )}
+                      <span>💡 Harf Al</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20">
+                        {revealVotes.length}/{players.length}
+                      </span>
                     </button>
-                  </form>
-                )}
+                  )}
+
+                  {/* Submitting input */}
+                  {isSubmitted ? (
+                    <div className="glass rounded-2xl p-6 border-purple-500/10 text-center shadow-lg">
+                      <svg className="w-8 h-8 text-emerald-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <p className="text-sm font-semibold text-slate-300">Cevabınız İletildi</p>
+                      <p className="text-xs text-slate-400 mt-1">Cevabınız: <span className="font-bold text-purple-400 uppercase">{myLastAnswer}</span></p>
+                      <p className="text-xs text-slate-500 mt-3 animate-pulse">Diğer oyuncuların bitirmesi bekleniyor...</p>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleAnswerSubmit} className="flex flex-col gap-3">
+                      <input
+                        type="text"
+                        required
+                        placeholder={gameMode === 'dictionary' ? 'Kelimeyi yazın...' : 'Cevabınızı buraya yazın...'}
+                        autoComplete="off"
+                        autoFocus
+                        value={answerInput}
+                        onChange={(e) => setAnswerInput(e.target.value)}
+                        className={`w-full px-5 py-4 rounded-xl border bg-slate-900 text-white placeholder-slate-500 outline-none text-center uppercase tracking-wide font-extrabold text-xl shadow-inner transition-all ${
+                          gameMode === 'dictionary'
+                            ? 'border-cyan-500/20 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500'
+                            : 'border-purple-500/20 focus:border-purple-500 focus:ring-1 focus:ring-purple-500'
+                        }`}
+                      />
+
+                      <button
+                        type="submit"
+                        disabled={submittingAnswer || !answerInput.trim()}
+                        className={`w-full py-4.5 rounded-xl font-bold text-white transition-all shadow-lg disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer text-base ${
+                          gameMode === 'dictionary'
+                            ? 'bg-cyan-600 hover:bg-cyan-500 hover:shadow-cyan-500/20'
+                            : 'bg-purple-600 hover:bg-purple-500 hover:shadow-purple-500/20'
+                        }`}
+                      >
+                        {submittingAnswer ? (
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          'Gönder'
+                        )}
+                      </button>
+                    </form>
+                  )}
+                </motion.div>
               </motion.div>
             )}
           </AnimatePresence>

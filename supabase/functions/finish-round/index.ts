@@ -199,8 +199,8 @@ serve(async (req: Request) => {
         scrambled = mergeAndShuffle(wordLetters, distractors);
       }
 
-      // Start time starts AFTER results view duration (e.g. 7 seconds from now)
-      const delayMs = 7000; // result duration
+      // Start time starts AFTER results view duration (e.g. 9 seconds from now to give 2 extra seconds of visibility)
+      const delayMs = 9000; // result duration
       const startedAt = new Date(Date.now() + delayMs);
       const endsAt = new Date(startedAt.getTime() + roundDurationMs);
 

@@ -43,7 +43,7 @@ serve(async (req: Request) => {
 
     const totalRounds = settings?.totalRounds || 8;
     const roundDurationSeconds = settings?.roundDurationSeconds || 30;
-    const resultDurationSeconds = settings?.resultDurationSeconds || 7;
+    const resultDurationSeconds = settings?.resultDurationSeconds || 9;
     const gameMode = settings?.gameMode || 'seed_words';
 
     // Create room

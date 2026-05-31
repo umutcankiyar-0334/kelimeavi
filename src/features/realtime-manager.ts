@@ -156,6 +156,13 @@ export function startRealtimeSync(roomId: string, roomCode: string) {
           fetchRoomState();
           fetchPlayersList();
         }
+        // Dispatch custom global window event so React pages can react to it in real-time!
+        if (typeof window !== 'undefined') {
+          const customEvent = new CustomEvent('supabase_room_event', {
+            detail: { type: payload.new.type, payload: payload.new.payload }
+          });
+          window.dispatchEvent(customEvent);
+        }
       }
     )
     .subscribe();

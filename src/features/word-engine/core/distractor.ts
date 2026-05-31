@@ -19,18 +19,15 @@ export function getDistractorCount(
   difficulty: DifficultyLevel
 ): number {
   // Override by explicit difficulty
-  if (difficulty === 'hard') {
-    return roundNumber >= Math.floor(totalRounds * 0.6) ? 2 : 1;
-  }
+  // ALWAYS have distractor letters to prevent having 0 distractors from round 1
   if (difficulty === 'easy') {
-    return 0;
+    return 1; // 1 distractor letter on easy
   }
-
-  // Medium: scale by round
-  const progress = roundNumber / totalRounds;
-  if (progress < 0.4) return 0;
-  if (progress < 0.75) return 1;
-  return 1;
+  if (difficulty === 'medium') {
+    return roundNumber >= Math.floor(totalRounds * 0.5) ? 2 : 1; // 1 or 2 distractors
+  }
+  // Hard
+  return roundNumber >= Math.floor(totalRounds * 0.5) ? 3 : 2; // 2 or 3 distractors
 }
 
 /**

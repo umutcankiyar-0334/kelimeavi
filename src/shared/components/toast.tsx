@@ -67,7 +67,7 @@ export function ToastContainer() {
 
 function ToastCard({ toast, onClose }: { toast: ToastItem; onClose: () => void }) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 4000);
+    const timer = setTimeout(onClose, 2500);
     return () => clearTimeout(timer);
   }, [onClose]);
 

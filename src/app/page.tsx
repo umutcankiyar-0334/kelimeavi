@@ -37,7 +37,7 @@ export default function LandingPage() {
         settings: {
           totalRounds: rounds,
           roundDurationSeconds: duration,
-          resultDurationSeconds: 7,
+          resultDurationSeconds: 9,
           gameMode,
         },
       });
